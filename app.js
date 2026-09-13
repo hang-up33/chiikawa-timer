@@ -161,10 +161,18 @@ async function notifyTimerFinished() {
     permission = await notificationPermissionPromise;
   }
 
-  if (permission === "granted") {
+  if (permission !== "granted") return;
+
+  // Android Chrome等、一部のモバイルブラウザでは `new Notification()` による
+  // 直接構築がサポートされずTypeErrorになる(Service Worker経由の
+  // showNotification()が必要)。通知は補完的な機能であり、画面表示
+  // (タイマー終了！)で完了は伝わるため、失敗時は静かに諦める。
+  try {
     new Notification("パジャマパーティーズタイマー", {
       body: "タイマーが終了しました",
     });
+  } catch (err) {
+    // 通知に失敗しても画面表示でフィードバックできているため無視する
   }
 }
 
