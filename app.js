@@ -26,9 +26,12 @@ let notificationPermissionPromise = null;
 let hasStarted = false;
 
 function clampInputs() {
-  let h = Math.min(24, Math.max(0, parseInt(hoursInput.value, 10) || 0));
-  let m = Math.min(59, Math.max(0, parseInt(minutesInput.value, 10) || 0));
-  let s = Math.min(59, Math.max(0, parseInt(secondsInput.value, 10) || 0));
+  // parseIntは"1e1"のような指数表記を先頭の"1"で打ち切ってしまう
+  // (本来は10と解釈すべき)ため、ブラウザ自身の数値解釈である
+  // valueAsNumberを使う。
+  let h = Math.min(24, Math.max(0, Math.floor(hoursInput.valueAsNumber) || 0));
+  let m = Math.min(59, Math.max(0, Math.floor(minutesInput.valueAsNumber) || 0));
+  let s = Math.min(59, Math.max(0, Math.floor(secondsInput.valueAsNumber) || 0));
 
   let total = h * 3600 + m * 60 + s;
   if (total > MAX_SECONDS) {
