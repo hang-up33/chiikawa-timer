@@ -94,9 +94,16 @@ function startTimer() {
 
 function pauseTimer() {
   if (!running) return;
+  const msLeft = endTime - Date.now();
+  if (msLeft <= 0) {
+    clearInterval(intervalId);
+    finishTimer();
+    return;
+  }
+
   running = false;
   clearInterval(intervalId);
-  remainingMs = Math.max(0, endTime - Date.now());
+  remainingMs = msLeft;
   startBtn.disabled = false;
   startBtn.textContent = "再開";
   pauseBtn.disabled = true;
