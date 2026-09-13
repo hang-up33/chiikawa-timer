@@ -220,6 +220,8 @@ function handlePlayerUnavailable() {
 
   if (running) {
     statusText.textContent = "パジャマパーティー中...(楽曲の再生に失敗しました)";
+    // 回復ボタンが表示されていた場合、壊れたplayerへの再試行を防ぐため隠す
+    playMusicBtn.hidden = true;
     return;
   }
   enableStartControl("最大24時間までセットできます(楽曲の読み込みに失敗しました)");
@@ -264,7 +266,10 @@ function onYouTubeIframeAPIReady() {
 }
 
 playMusicBtn.addEventListener("click", () => {
-  if (!running) return;
+  if (!running || playerUnavailable) return;
   player.playVideo();
   playMusicBtn.hidden = true;
+  // Start時点では失敗ステータスだった可能性があるため、
+  // 回復した今は通常の実行中メッセージに戻す
+  statusText.textContent = "パジャマパーティー中...";
 });
