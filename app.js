@@ -81,14 +81,19 @@ function startTimer() {
   startBtn.disabled = true;
   pauseBtn.disabled = false;
   resetBtn.disabled = false;
-  statusText.textContent = "パジャマパーティー中...";
+  statusText.textContent = playerUnavailable
+    ? "パジャマパーティー中...(楽曲の再生に失敗しました)"
+    : "パジャマパーティー中...";
 
   if (typeof Notification !== "undefined" && Notification.permission === "default") {
     notificationPermissionPromise = Notification.requestPermission();
   }
 
-  if (playerReady) {
+  if (playerReady && !playerUnavailable) {
     player.playVideo();
+    // 通常の再生手段(このplayVideo呼び出し)で音楽が始まるため、
+    // 遅延ready用の「音楽を再生する」ボタンはもう不要
+    playMusicBtn.hidden = true;
   }
 
   intervalId = setInterval(tick, 250);
@@ -111,6 +116,9 @@ function pauseTimer() {
   startBtn.textContent = "再開";
   pauseBtn.disabled = true;
   statusText.textContent = "一時停止中";
+  // 再開時に上のplayVideo()呼び出しで音楽も再開されるため、
+  // 一時停止中はボタン自体を隠して誤操作(running=falseでの再生)を防ぐ
+  playMusicBtn.hidden = true;
 
   if (playerReady) {
     player.pauseVideo();
@@ -230,11 +238,14 @@ function onYouTubeIframeAPIReady() {
         }
         // 6秒のフォールバックで一度「利用不可」扱いにした後、
         // 実際には(単に遅かっただけで)準備が完了したケース。
-        // タイマー実行中なら、ユーザー操作を伴う新しい再生ボタンを
-        // 提示し、そこからのクリックでautoplay制限を回避して再生する。
         playerUnavailable = false;
         if (running) {
+          // タイマー実行中なら、ユーザー操作を伴う新しい再生ボタンを
+          // 提示し、そこからのクリックでautoplay制限を回避して再生する。
           playMusicBtn.hidden = false;
+        } else {
+          // まだStart前なら、次のStartで通常通り再生できる状態に戻す
+          enableStartControl("最大24時間までセットできます");
         }
       },
       onError: handlePlayerUnavailable,
@@ -243,6 +254,7 @@ function onYouTubeIframeAPIReady() {
 }
 
 playMusicBtn.addEventListener("click", () => {
+  if (!running) return;
   player.playVideo();
   playMusicBtn.hidden = true;
 });
