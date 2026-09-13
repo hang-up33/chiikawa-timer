@@ -20,10 +20,9 @@ let endTime = 0; // Date.now() + remainingMs のタイムスタンプ
 let remainingMs = 0;
 let running = false;
 let notificationPermissionPromise = null;
-// タイマー実行中に「音楽が再生されているべきか」を表す。バックグラウンド化
-// (タブの非表示・画面ロック等)でブラウザ側が動画を強制停止した場合に、
-// ユーザー操作によるpause(pauseTimer/resetTimer/finishTimer)と区別して
-// 自動的に再開するために使う。
+// タイマー実行中に「音楽が再生されているべきか」を表す。タブがバックグラウンド
+// から復帰した際、ユーザー操作によるpause(pauseTimer/resetTimer/finishTimer/
+// プレーヤー自体の一時停止操作)と区別して自動的に再開すべきかどうかの判定に使う。
 let shouldBePlaying = false;
 // 一度でもStartが押されたか(一時停止中・終了後もtrueのまま維持し、
 // Resetで初期状態に戻す)。「まだ一度もStartしていない」場合にのみ
@@ -274,35 +273,29 @@ function onYouTubeIframeAPIReady() {
         }
       },
       onError: handlePlayerUnavailable,
-      onStateChange: handlePlayerStateChange,
     },
   });
 }
 
-// バックグラウンド化(タブ切り替え・画面ロック等)でブラウザ/OSが動画を
-// 強制的に一時停止することがある。ユーザー操作によるpauseではなく、
-// まだ再生中であるべき(shouldBePlaying)ときにPAUSEDへ変化した場合は
-// 自動的に再生を再開する。
-function handlePlayerStateChange(event) {
-  if (
-    event.data === YT.PlayerState.PAUSED &&
-    shouldBePlaying &&
-    running &&
-    !playerUnavailable
-  ) {
-    player.playVideo();
-  }
-}
+// 非表示になる直前の再生状態を覚えておく。復帰時に「非表示の間にブラウザ/OSが
+// 強制停止した」場合(直前はPLAYING/BUFFERINGだった)とプレーヤー自身の操作で
+// 元々一時停止されていた場合を区別し、後者では自動再開しないようにするため。
+let wasPlayingBeforeHidden = false;
 
-// タブがバックグラウンドから復帰した際、setIntervalの間引きで表示が
-// 遅れている可能性があるため即座に再計算する。また、ブラウザが動画を
-// 一時停止したまま復帰後も再開しなかった場合に備えて再生状態を確認する。
 document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    wasPlayingBeforeHidden =
+      playerReady && !playerUnavailable && player.getPlayerState() !== YT.PlayerState.PAUSED;
+    return;
+  }
+
   if (document.visibilityState !== "visible" || !running) return;
 
+  // タブがバックグラウンドから復帰した際、setIntervalの間引きで表示が
+  // 遅れている可能性があるため即座に再計算する。
   tick();
 
-  if (playerReady && !playerUnavailable && shouldBePlaying) {
+  if (playerReady && !playerUnavailable && shouldBePlaying && wasPlayingBeforeHidden) {
     const state = player.getPlayerState();
     if (state !== YT.PlayerState.PLAYING && state !== YT.PlayerState.BUFFERING) {
       player.playVideo();
