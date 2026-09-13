@@ -13,6 +13,7 @@ const inputs = [hoursInput, minutesInput, secondsInput];
 
 let player = null;
 let playerReady = false;
+let playerUnavailable = false;
 let intervalId = null;
 let endTime = 0; // Date.now() + remainingMs のタイムスタンプ
 let remainingMs = 0;
@@ -174,6 +175,21 @@ inputs.forEach((input) => input.addEventListener("change", clampInputs));
 
 updateDisplay(0);
 
+function enableStartControl(message) {
+  if (running) return;
+  startBtn.disabled = false;
+  statusText.textContent = message;
+}
+
+// 楽曲の読み込みに失敗しても、タイマー自体は音源なしで使えるようにする
+function handlePlayerUnavailable() {
+  if (playerReady || playerUnavailable) return;
+  playerUnavailable = true;
+  enableStartControl("最大24時間までセットできます(楽曲の読み込みに失敗しました)");
+}
+
+setTimeout(handlePlayerUnavailable, 6000);
+
 // YouTube IFrame API が読み込まれると呼び出される
 function onYouTubeIframeAPIReady() {
   player = new YT.Player("player", {
@@ -182,14 +198,14 @@ function onYouTubeIframeAPIReady() {
       loop: 1,
       playlist: VIDEO_ID,
       rel: 0,
+      playsinline: 1,
     },
     events: {
       onReady: () => {
         playerReady = true;
-        if (running) {
-          player.playVideo();
-        }
+        enableStartControl("最大24時間までセットできます");
       },
+      onError: handlePlayerUnavailable,
     },
   });
 }
