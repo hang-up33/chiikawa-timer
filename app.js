@@ -9,6 +9,7 @@ const statusText = document.getElementById("statusText");
 const startBtn = document.getElementById("startBtn");
 const pauseBtn = document.getElementById("pauseBtn");
 const resetBtn = document.getElementById("resetBtn");
+const playMusicBtn = document.getElementById("playMusicBtn");
 const inputs = [hoursInput, minutesInput, secondsInput];
 
 let player = null;
@@ -127,6 +128,7 @@ function resetTimer() {
   resetBtn.disabled = true;
   statusText.textContent = "最大24時間までセットできます";
   updateDisplay(0);
+  playMusicBtn.hidden = true;
 
   if (playerReady) {
     player.pauseVideo();
@@ -145,6 +147,7 @@ async function finishTimer() {
   pauseBtn.disabled = true;
   resetBtn.disabled = true;
   statusText.textContent = "タイマー終了！";
+  playMusicBtn.hidden = true;
 
   if (playerReady) {
     player.pauseVideo();
@@ -223,9 +226,23 @@ function onYouTubeIframeAPIReady() {
         playerReady = true;
         if (!playerUnavailable) {
           enableStartControl("最大24時間までセットできます");
+          return;
+        }
+        // 6秒のフォールバックで一度「利用不可」扱いにした後、
+        // 実際には(単に遅かっただけで)準備が完了したケース。
+        // タイマー実行中なら、ユーザー操作を伴う新しい再生ボタンを
+        // 提示し、そこからのクリックでautoplay制限を回避して再生する。
+        playerUnavailable = false;
+        if (running) {
+          playMusicBtn.hidden = false;
         }
       },
       onError: handlePlayerUnavailable,
     },
   });
 }
+
+playMusicBtn.addEventListener("click", () => {
+  player.playVideo();
+  playMusicBtn.hidden = true;
+});
