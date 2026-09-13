@@ -20,6 +20,10 @@ let endTime = 0; // Date.now() + remainingMs のタイムスタンプ
 let remainingMs = 0;
 let running = false;
 let notificationPermissionPromise = null;
+// タイマー実行中に「音楽が再生されているべきか」を表す。タブがバックグラウンド
+// から復帰した際、ユーザー操作によるpause(pauseTimer/resetTimer/finishTimer/
+// プレーヤー自体の一時停止操作)と区別して自動的に再開すべきかどうかの判定に使う。
+let shouldBePlaying = false;
 // 一度でもStartが押されたか(一時停止中・終了後もtrueのまま維持し、
 // Resetで初期状態に戻す)。「まだ一度もStartしていない」場合にのみ
 // 自動復旧メッセージでstatusTextを上書きしてよいかどうかの判定に使う。
@@ -99,6 +103,7 @@ function startTimer() {
 
   if (playerReady && !playerUnavailable) {
     player.playVideo();
+    shouldBePlaying = true;
     // 通常の再生手段(このplayVideo呼び出し)で音楽が始まるため、
     // 遅延ready用の「音楽を再生する」ボタンはもう不要
     playMusicBtn.hidden = true;
@@ -127,6 +132,7 @@ function pauseTimer() {
   // 再開時に上のplayVideo()呼び出しで音楽も再開されるため、
   // 一時停止中はボタン自体を隠して誤操作(running=falseでの再生)を防ぐ
   playMusicBtn.hidden = true;
+  shouldBePlaying = false;
 
   if (playerReady) {
     player.pauseVideo();
@@ -146,6 +152,7 @@ function resetTimer() {
   statusText.textContent = "最大24時間までセットできます";
   updateDisplay(0);
   playMusicBtn.hidden = true;
+  shouldBePlaying = false;
 
   if (playerReady) {
     player.pauseVideo();
@@ -165,6 +172,7 @@ async function finishTimer() {
   resetBtn.disabled = true;
   statusText.textContent = "タイマー終了！";
   playMusicBtn.hidden = true;
+  shouldBePlaying = false;
 
   if (playerReady) {
     player.pauseVideo();
@@ -269,9 +277,36 @@ function onYouTubeIframeAPIReady() {
   });
 }
 
+// 非表示になる直前の再生状態を覚えておく。復帰時に「非表示の間にブラウザ/OSが
+// 強制停止した」場合(直前はPLAYING/BUFFERINGだった)とプレーヤー自身の操作で
+// 元々一時停止されていた場合を区別し、後者では自動再開しないようにするため。
+let wasPlayingBeforeHidden = false;
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    wasPlayingBeforeHidden =
+      playerReady && !playerUnavailable && player.getPlayerState() !== YT.PlayerState.PAUSED;
+    return;
+  }
+
+  if (document.visibilityState !== "visible" || !running) return;
+
+  // タブがバックグラウンドから復帰した際、setIntervalの間引きで表示が
+  // 遅れている可能性があるため即座に再計算する。
+  tick();
+
+  if (playerReady && !playerUnavailable && shouldBePlaying && wasPlayingBeforeHidden) {
+    const state = player.getPlayerState();
+    if (state !== YT.PlayerState.PLAYING && state !== YT.PlayerState.BUFFERING) {
+      player.playVideo();
+    }
+  }
+});
+
 playMusicBtn.addEventListener("click", () => {
   if (!running || playerUnavailable) return;
   player.playVideo();
+  shouldBePlaying = true;
   playMusicBtn.hidden = true;
   // Start時点では失敗ステータスだった可能性があるため、
   // 回復した今は通常の実行中メッセージに戻す
