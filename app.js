@@ -20,6 +20,10 @@ let endTime = 0; // Date.now() + remainingMs のタイムスタンプ
 let remainingMs = 0;
 let running = false;
 let notificationPermissionPromise = null;
+// 一度でもStartが押されたか(一時停止中・終了後もtrueのまま維持し、
+// Resetで初期状態に戻す)。「まだ一度もStartしていない」場合にのみ
+// 自動復旧メッセージでstatusTextを上書きしてよいかどうかの判定に使う。
+let hasStarted = false;
 
 function clampInputs() {
   let h = Math.min(24, Math.max(0, parseInt(hoursInput.value, 10) || 0));
@@ -66,6 +70,7 @@ function tick() {
 }
 
 function startTimer() {
+  hasStarted = true;
   if (!running && remainingMs === 0) {
     const totalSeconds = clampInputs();
     if (totalSeconds <= 0) {
@@ -127,6 +132,7 @@ function pauseTimer() {
 
 function resetTimer() {
   running = false;
+  hasStarted = false;
   remainingMs = 0;
   clearInterval(intervalId);
   setInputsDisabled(false);
@@ -197,7 +203,11 @@ updateDisplay(0);
 function enableStartControl(message) {
   if (running) return;
   startBtn.disabled = false;
-  statusText.textContent = message;
+  // 一時停止中・終了後(hasStarted=true)は、それぞれの状態を示す
+  // メッセージ(一時停止中/タイマー終了！)を上書きしない
+  if (!hasStarted) {
+    statusText.textContent = message;
+  }
 }
 
 // 楽曲が利用できない(API読み込み失敗・タイムアウト・埋め込み不可などの
