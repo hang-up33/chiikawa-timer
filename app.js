@@ -80,7 +80,7 @@ function startTimer() {
   resetBtn.disabled = false;
   statusText.textContent = "パジャマパーティー中...";
 
-  if (Notification && Notification.permission === "default") {
+  if (typeof Notification !== "undefined" && Notification.permission === "default") {
     Notification.requestPermission();
   }
 
@@ -141,7 +141,7 @@ function finishTimer() {
     player.pauseVideo();
   }
 
-  if (Notification && Notification.permission === "granted") {
+  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
     new Notification("パジャマパーティーズタイマー", {
       body: "タイマーが終了しました",
     });
@@ -167,6 +167,9 @@ function onYouTubeIframeAPIReady() {
     events: {
       onReady: () => {
         playerReady = true;
+        if (running) {
+          player.playVideo();
+        }
       },
     },
   });
