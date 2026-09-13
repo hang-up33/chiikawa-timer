@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ちいかわ パジャマパーティーズタイマー</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <h1>パジャマパーティーズタイマー</h1>
+
+    <div class="time-display" id="timeDisplay">00:00:00</div>
+
+    <div class="time-inputs" id="timeInputs">
+      <div class="time-field">
+        <input type="number" id="hoursInput" min="0" max="24" value="0" inputmode="numeric">
+        <label>時間</label>
+      </div>
+      <div class="time-field">
+        <input type="number" id="minutesInput" min="0" max="59" value="0" inputmode="numeric">
+        <label>分</label>
+      </div>
+      <div class="time-field">
+        <input type="number" id="secondsInput" min="0" max="59" value="0" inputmode="numeric">
+        <label>秒</label>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button id="startBtn" class="btn btn-start">スタート</button>
+      <button id="pauseBtn" class="btn btn-pause" disabled>一時停止</button>
+      <button id="resetBtn" class="btn btn-reset" disabled>リセット</button>
+    </div>
+
+    <p class="status" id="statusText">最大24時間までセットできます</p>
+
+    <div class="player-wrap">
+      <div id="player"></div>
+      <p class="player-caption">再生中:「パジャマパーティーズのうた」(公式配信)</p>
+    </div>
+
+    <p class="credit">
+      本アプリは楽曲ファイルを配布していません。再生はYouTubeの公式配信元による埋め込みプレーヤーを利用しています。
+      「パジャマパーティーズのうた」©ちいかわ製作委員会・Pony Canyon
+    </p>
+  </div>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="app.js"></script>
+</body>
+</html>
