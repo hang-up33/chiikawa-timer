@@ -181,14 +181,24 @@ function enableStartControl(message) {
   statusText.textContent = message;
 }
 
-// 楽曲の読み込みに失敗しても、タイマー自体は音源なしで使えるようにする
+// 楽曲が利用できない(API読み込み失敗・タイムアウト・埋め込み不可などの
+// 動画エラー)場合でも、タイマー自体は音源なしで使えるようにする。
+// onReady後(API準備完了後)に発生した動画エラーも拾えるよう、
+// playerReadyではなくplayerUnavailableのみをガードに使う。
 function handlePlayerUnavailable() {
-  if (playerReady || playerUnavailable) return;
+  if (playerUnavailable) return;
   playerUnavailable = true;
+
+  if (running) {
+    statusText.textContent = "パジャマパーティー中...(楽曲の再生に失敗しました)";
+    return;
+  }
   enableStartControl("最大24時間までセットできます(楽曲の読み込みに失敗しました)");
 }
 
-setTimeout(handlePlayerUnavailable, 6000);
+setTimeout(() => {
+  if (!playerReady) handlePlayerUnavailable();
+}, 6000);
 
 // YouTube IFrame API が読み込まれると呼び出される
 function onYouTubeIframeAPIReady() {
@@ -203,7 +213,9 @@ function onYouTubeIframeAPIReady() {
     events: {
       onReady: () => {
         playerReady = true;
-        enableStartControl("最大24時間までセットできます");
+        if (!playerUnavailable) {
+          enableStartControl("最大24時間までセットできます");
+        }
       },
       onError: handlePlayerUnavailable,
     },
