@@ -246,6 +246,7 @@ function onYouTubeIframeAPIReady() {
     },
     events: {
       onReady: () => {
+        player.setVolume(50); // 初期音量が大きすぎるため、デフォルトを50%に下げる
         playerReady = true;
         if (!playerUnavailable) {
           enableStartControl("最大24時間までセットできます");
