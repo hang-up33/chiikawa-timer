@@ -17,6 +17,7 @@ let intervalId = null;
 let endTime = 0; // Date.now() + remainingMs のタイムスタンプ
 let remainingMs = 0;
 let running = false;
+let notificationPermissionPromise = null;
 
 function clampInputs() {
   let h = Math.min(24, Math.max(0, parseInt(hoursInput.value, 10) || 0));
@@ -81,7 +82,7 @@ function startTimer() {
   statusText.textContent = "パジャマパーティー中...";
 
   if (typeof Notification !== "undefined" && Notification.permission === "default") {
-    Notification.requestPermission();
+    notificationPermissionPromise = Notification.requestPermission();
   }
 
   if (playerReady) {
@@ -132,7 +133,7 @@ function resetTimer() {
   }
 }
 
-function finishTimer() {
+async function finishTimer() {
   running = false;
   remainingMs = 0;
   clearInterval(intervalId);
@@ -148,7 +149,18 @@ function finishTimer() {
     player.pauseVideo();
   }
 
-  if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+  await notifyTimerFinished();
+}
+
+async function notifyTimerFinished() {
+  if (typeof Notification === "undefined") return;
+
+  let permission = Notification.permission;
+  if (permission === "default" && notificationPermissionPromise) {
+    permission = await notificationPermissionPromise;
+  }
+
+  if (permission === "granted") {
     new Notification("パジャマパーティーズタイマー", {
       body: "タイマーが終了しました",
     });
