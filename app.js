@@ -28,6 +28,9 @@ let shouldBePlaying = false;
 // Resetで初期状態に戻す)。「まだ一度もStartしていない」場合にのみ
 // 自動復旧メッセージでstatusTextを上書きしてよいかどうかの判定に使う。
 let hasStarted = false;
+// 終了音用のAudioContext。autoplay制限を回避するため、ユーザー操作
+// (スタートのクリック)の中で生成・resumeしておき、終了時に再利用する。
+let audioCtx = null;
 
 function clampInputs() {
   // parseIntは"1e1"のような指数表記を先頭の"1"で打ち切ってしまう
@@ -76,8 +79,46 @@ function tick() {
   updateDisplay(msLeft);
 }
 
+function unlockAudio() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  try {
+    if (!audioCtx) audioCtx = new Ctx();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch (err) {
+    // 効果音は補完的な機能のため、利用できなくてもタイマーは動作させる
+    audioCtx = null;
+  }
+}
+
+// 音源ファイルを同梱しないよう、Web Audio APIで「ピロリン」という
+// チャイムを合成して3回鳴らす。
+function playFinishSound() {
+  if (!audioCtx) return;
+  if (audioCtx.state === "suspended") audioCtx.resume();
+
+  const notes = [1046.5, 1318.5, 1568.0]; // C6, E6, G6
+  const start = audioCtx.currentTime + 0.05;
+  for (let rep = 0; rep < 3; rep++) {
+    notes.forEach((freq, i) => {
+      const t = start + rep * 0.9 + i * 0.15;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, t);
+      gain.gain.linearRampToValueAtTime(0.3, t + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.55);
+    });
+  }
+}
+
 function startTimer() {
   hasStarted = true;
+  unlockAudio();
   if (!running && remainingMs === 0) {
     const totalSeconds = clampInputs();
     if (totalSeconds <= 0) {
@@ -178,6 +219,7 @@ async function finishTimer() {
     player.pauseVideo();
   }
 
+  playFinishSound();
   await notifyTimerFinished();
 }
 
