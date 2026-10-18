@@ -171,8 +171,52 @@ function tick() {
   updateDisplay(msLeft);
 }
 
+// 終了音はWeb Audio APIで合成する(音源ファイル不要)。ブラウザのautoplay制限で
+// ユーザー操作なしにAudioContextを開始できないため、Startクリック時に作成・再開しておく。
+let audioCtx = null;
+
+function unlockAudio() {
+  try {
+    if (!audioCtx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      audioCtx = new AudioCtx();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch (err) {
+    // 効果音は補完的な機能のため、使えない環境では鳴らさない
+  }
+}
+
+// 「ピロリロリン」と上がるチャイムを3回くり返す
+function playFinishSound() {
+  if (!audioCtx) return;
+  try {
+    const notes = [1046.5, 1318.5, 1568.0, 2093.0]; // ド・ミ・ソ・ド
+    const start = audioCtx.currentTime + 0.05;
+    for (let r = 0; r < 3; r++) {
+      notes.forEach((freq, i) => {
+        const t = start + r * 0.9 + i * 0.12;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = "triangle";
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.0001, t);
+        gain.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(t);
+        osc.stop(t + 0.55);
+      });
+    }
+  } catch (err) {
+    // 鳴らせなくても画面表示・通知で終了は伝わる
+  }
+}
+
 function startTimer() {
   hasStarted = true;
+  unlockAudio();
   if (!running && remainingMs === 0) {
     const totalSeconds = clampInputs();
     if (totalSeconds <= 0) {
@@ -271,6 +315,7 @@ async function finishTimer() {
     player.pauseVideo();
   }
 
+  playFinishSound();
   await notifyTimerFinished();
 }
 
