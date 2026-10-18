@@ -15,6 +15,12 @@ const TRACKS = [
   },
 ];
 const TRACK_STORAGE_KEY = "chiikawa-timer:track";
+// 終了音: 『映画ちいかわ 人魚の島のひみつ』WEBCMうさぎラップ篇(東宝MOVIEチャンネル公式)の
+// うさぎの声の部分だけを、BGMと同じ埋め込みプレーヤーで再生する
+const FINISH_CLIP = { id: "sT1A-4zjKqQ", start: 14, end: 17 };
+// この時間内に終了音の再生が始まらなければ(バックグラウンド等で再生が
+// ブロックされた場合など)、合成音に切り替える
+const FINISH_CLIP_START_TIMEOUT_MS = 3000;
 
 const hoursInput = document.getElementById("hoursInput");
 const minutesInput = document.getElementById("minutesInput");
@@ -113,6 +119,7 @@ function switchTrack(trackId) {
   }
   if (running) statusText.textContent = runningStatusText();
 
+  stopFinishClip();
   loadedVideoId = track.id;
   if (running && (shouldBePlaying || !playMusicBtn.hidden)) {
     // selectのchangeはユーザー操作なのでautoplay制限にかからない
@@ -248,8 +255,8 @@ function scheduleYaha(ctx, t) {
   scheduleVoiced(ctx, t + 0.2, 0.17, 1100, 1350, VOWEL_A, VOWEL_A, 0); // ハッ
 }
 
-// 「ヤハッ！ヤハッ！」と2回叫ぶ
-function playFinishSound() {
+// 「ヤハッ！ヤハッ！」と2回叫ぶ(公式の終了音が鳴らせないときの代わり)
+function playSynthFinishSound() {
   if (!audioCtx) return;
   try {
     const start = audioCtx.currentTime + 0.05;
@@ -257,6 +264,70 @@ function playFinishSound() {
     scheduleYaha(audioCtx, start + 0.6);
   } catch (err) {
     // 鳴らせなくても画面表示・通知で終了は伝わる
+  }
+}
+
+// 終了音クリップの再生状態
+let playingFinishClip = false;
+let finishClipStarted = false;
+let finishClipTimer = null;
+
+function stopFinishClip() {
+  playingFinishClip = false;
+  finishClipStarted = false;
+  clearTimeout(finishClipTimer);
+}
+
+// 終了音クリップが終わったら、BGMを選択中の曲に戻して次のStartに備える
+function endFinishClip() {
+  if (!playingFinishClip) return;
+  stopFinishClip();
+  loadedVideoId = currentTrack.id;
+  player.cueVideoById(currentTrack.id);
+}
+
+function playFinishSound() {
+  if (!playerReady || playerUnavailable) {
+    playSynthFinishSound();
+    return;
+  }
+
+  playingFinishClip = true;
+  finishClipStarted = false;
+  loadedVideoId = FINISH_CLIP.id;
+  player.loadVideoById({
+    videoId: FINISH_CLIP.id,
+    startSeconds: FINISH_CLIP.start,
+    endSeconds: FINISH_CLIP.end,
+  });
+
+  finishClipTimer = setTimeout(() => {
+    if (!playingFinishClip) return;
+    if (!finishClipStarted) {
+      endFinishClip();
+      playSynthFinishSound();
+      return;
+    }
+    // 再生は始まったが終了イベントが来ない場合の保険
+    endFinishClip();
+  }, FINISH_CLIP_START_TIMEOUT_MS);
+}
+
+function handleFinishClipStateChange(state) {
+  if (state === YT.PlayerState.PLAYING) {
+    if (!finishClipStarted) {
+      finishClipStarted = true;
+      // 再生が始まったら、クリップの長さ+余裕を見て必ずBGMに戻す
+      clearTimeout(finishClipTimer);
+      finishClipTimer = setTimeout(
+        endFinishClip,
+        (FINISH_CLIP.end - FINISH_CLIP.start + 2) * 1000
+      );
+    }
+    return;
+  }
+  if (finishClipStarted && (state === YT.PlayerState.ENDED || state === YT.PlayerState.PAUSED)) {
+    endFinishClip();
   }
 }
 
@@ -285,7 +356,14 @@ function startTimer() {
   }
 
   if (playerReady && !playerUnavailable) {
-    player.playVideo();
+    if (playingFinishClip) {
+      // 終了音の再生中に次のStartが押されたら、すぐ選択中の曲に戻して再生する
+      stopFinishClip();
+      loadedVideoId = currentTrack.id;
+      player.loadVideoById(currentTrack.id);
+    } else {
+      player.playVideo();
+    }
     shouldBePlaying = true;
     // 通常の再生手段(このplayVideo呼び出し)で音楽が始まるため、
     // 遅延ready用の「音楽を再生する」ボタンはもう不要
@@ -464,13 +542,26 @@ function onYouTubeIframeAPIReady() {
         }
       },
       onStateChange: (event) => {
+        if (playingFinishClip) {
+          handleFinishClipStateChange(event.data);
+          return;
+        }
         // 曲が終わったら、タイマー実行中は頭から繰り返す
         if (event.data === YT.PlayerState.ENDED && running && shouldBePlaying) {
           player.seekTo(0, true);
           player.playVideo();
         }
       },
-      onError: handlePlayerUnavailable,
+      onError: () => {
+        // 終了音クリップだけが再生できない場合は、BGMまで利用不可扱いにせず
+        // 合成音で代わりに鳴らす
+        if (playingFinishClip) {
+          endFinishClip();
+          playSynthFinishSound();
+          return;
+        }
+        handlePlayerUnavailable();
+      },
     },
   });
 }
