@@ -15,6 +15,12 @@ const TRACKS = [
   },
 ];
 const TRACK_STORAGE_KEY = "chiikawa-timer:track";
+// 終了音: 『映画ちいかわ 人魚の島のひみつ』WEBCMうさぎラップ篇(東宝MOVIEチャンネル公式)の
+// うさぎの声の部分だけを、BGMと同じ埋め込みプレーヤーで再生する
+const FINISH_CLIP = { id: "sT1A-4zjKqQ", start: 14, end: 17 };
+// この時間内に終了音の再生が始まらなければ(バックグラウンド等で再生が
+// ブロックされた場合など)、合成音に切り替える
+const FINISH_CLIP_START_TIMEOUT_MS = 3000;
 
 const hoursInput = document.getElementById("hoursInput");
 const minutesInput = document.getElementById("minutesInput");
@@ -113,6 +119,7 @@ function switchTrack(trackId) {
   }
   if (running) statusText.textContent = runningStatusText();
 
+  stopFinishClip();
   loadedVideoId = track.id;
   if (running && (shouldBePlaying || !playMusicBtn.hidden)) {
     // selectのchangeはユーザー操作なのでautoplay制限にかからない
@@ -171,8 +178,162 @@ function tick() {
   updateDisplay(msLeft);
 }
 
+// 終了音はWeb Audio APIで合成する(音源ファイル不要)。ブラウザのautoplay制限で
+// ユーザー操作なしにAudioContextを開始できないため、Startクリック時に作成・再開しておく。
+let audioCtx = null;
+
+function unlockAudio() {
+  try {
+    if (!audioCtx) {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      audioCtx = new AudioCtx();
+    }
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch (err) {
+    // 効果音は補完的な機能のため、使えない環境では鳴らさない
+  }
+}
+
+// うさぎの「ヤハッ！」風の声をフォルマント合成で作る(公式音声ではなく雰囲気を寄せた音)。
+// のこぎり波(声帯の代わり)を母音ごとの共鳴帯域(フォルマント)のバンドパスに通して
+// 「ヤ」(イ→アへの移行)、息の雑音で「ハ」、最後に急に止めて「ッ」を表現する。
+const VOWEL_I = [350, 2700, 3400];
+const VOWEL_A = [1000, 1500, 3000];
+const FORMANT_GAINS = [1, 0.7, 0.35];
+
+function scheduleVoiced(ctx, t, dur, f0From, f0To, vowelFrom, vowelTo, glide) {
+  const osc = ctx.createOscillator();
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(f0From, t);
+  osc.frequency.linearRampToValueAtTime(f0To, t + dur);
+
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.exponentialRampToValueAtTime(0.5, t + 0.015);
+  env.gain.setValueAtTime(0.5, t + dur - 0.02);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + dur); // 「ッ」で急に止める
+  env.connect(ctx.destination);
+
+  vowelFrom.forEach((freq, i) => {
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.Q.value = 6;
+    filter.frequency.setValueAtTime(freq, t);
+    filter.frequency.linearRampToValueAtTime(vowelTo[i], t + glide);
+    const gain = ctx.createGain();
+    gain.gain.value = FORMANT_GAINS[i];
+    osc.connect(filter).connect(gain).connect(env);
+  });
+
+  osc.start(t);
+  osc.stop(t + dur + 0.02);
+}
+
+function scheduleBreath(ctx, t, dur) {
+  const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.value = 1600;
+  filter.Q.value = 0.8;
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  noise.connect(filter).connect(env).connect(ctx.destination);
+  noise.start(t);
+}
+
+function scheduleYaha(ctx, t) {
+  scheduleVoiced(ctx, t, 0.16, 720, 980, VOWEL_I, VOWEL_A, 0.07); // ヤ
+  scheduleBreath(ctx, t + 0.15, 0.06); // h
+  scheduleVoiced(ctx, t + 0.2, 0.17, 1100, 1350, VOWEL_A, VOWEL_A, 0); // ハッ
+}
+
+// 「ヤハッ！ヤハッ！」と2回叫ぶ(公式の終了音が鳴らせないときの代わり)
+function playSynthFinishSound() {
+  if (!audioCtx) return;
+  try {
+    const start = audioCtx.currentTime + 0.05;
+    scheduleYaha(audioCtx, start);
+    scheduleYaha(audioCtx, start + 0.6);
+  } catch (err) {
+    // 鳴らせなくても画面表示・通知で終了は伝わる
+  }
+}
+
+// 終了音クリップの再生状態
+let playingFinishClip = false;
+let finishClipStarted = false;
+let finishClipTimer = null;
+
+function stopFinishClip() {
+  playingFinishClip = false;
+  finishClipStarted = false;
+  clearTimeout(finishClipTimer);
+}
+
+// 終了音クリップが終わったら、BGMを選択中の曲に戻して次のStartに備える
+function endFinishClip() {
+  if (!playingFinishClip) return;
+  stopFinishClip();
+  loadedVideoId = currentTrack.id;
+  player.cueVideoById(currentTrack.id);
+}
+
+function playFinishSound() {
+  if (!playerReady || playerUnavailable) {
+    playSynthFinishSound();
+    return;
+  }
+
+  playingFinishClip = true;
+  finishClipStarted = false;
+  loadedVideoId = FINISH_CLIP.id;
+  player.loadVideoById({
+    videoId: FINISH_CLIP.id,
+    startSeconds: FINISH_CLIP.start,
+    endSeconds: FINISH_CLIP.end,
+  });
+
+  finishClipTimer = setTimeout(() => {
+    if (!playingFinishClip) return;
+    if (!finishClipStarted) {
+      endFinishClip();
+      playSynthFinishSound();
+      return;
+    }
+    // 再生は始まったが終了イベントが来ない場合の保険
+    endFinishClip();
+  }, FINISH_CLIP_START_TIMEOUT_MS);
+}
+
+function handleFinishClipStateChange(state) {
+  if (state === YT.PlayerState.PLAYING) {
+    if (!finishClipStarted) {
+      finishClipStarted = true;
+      // 再生が始まったら、クリップの長さ+余裕を見て必ずBGMに戻す
+      clearTimeout(finishClipTimer);
+      finishClipTimer = setTimeout(
+        endFinishClip,
+        (FINISH_CLIP.end - FINISH_CLIP.start + 2) * 1000
+      );
+    }
+    return;
+  }
+  if (finishClipStarted && (state === YT.PlayerState.ENDED || state === YT.PlayerState.PAUSED)) {
+    endFinishClip();
+  }
+}
+
 function startTimer() {
   hasStarted = true;
+  unlockAudio();
   if (!running && remainingMs === 0) {
     const totalSeconds = clampInputs();
     if (totalSeconds <= 0) {
@@ -195,7 +356,14 @@ function startTimer() {
   }
 
   if (playerReady && !playerUnavailable) {
-    player.playVideo();
+    if (playingFinishClip) {
+      // 終了音の再生中に次のStartが押されたら、すぐ選択中の曲に戻して再生する
+      stopFinishClip();
+      loadedVideoId = currentTrack.id;
+      player.loadVideoById(currentTrack.id);
+    } else {
+      player.playVideo();
+    }
     shouldBePlaying = true;
     // 通常の再生手段(このplayVideo呼び出し)で音楽が始まるため、
     // 遅延ready用の「音楽を再生する」ボタンはもう不要
@@ -271,6 +439,7 @@ async function finishTimer() {
     player.pauseVideo();
   }
 
+  playFinishSound();
   await notifyTimerFinished();
 }
 
@@ -373,13 +542,26 @@ function onYouTubeIframeAPIReady() {
         }
       },
       onStateChange: (event) => {
+        if (playingFinishClip) {
+          handleFinishClipStateChange(event.data);
+          return;
+        }
         // 曲が終わったら、タイマー実行中は頭から繰り返す
         if (event.data === YT.PlayerState.ENDED && running && shouldBePlaying) {
           player.seekTo(0, true);
           player.playVideo();
         }
       },
-      onError: handlePlayerUnavailable,
+      onError: () => {
+        // 終了音クリップだけが再生できない場合は、BGMまで利用不可扱いにせず
+        // 合成音で代わりに鳴らす
+        if (playingFinishClip) {
+          endFinishClip();
+          playSynthFinishSound();
+          return;
+        }
+        handlePlayerUnavailable();
+      },
     },
   });
 }
