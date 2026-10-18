@@ -1,8 +1,18 @@
 const MAX_SECONDS = 24 * 60 * 60;
 // 選べる楽曲(いずれもYouTube公式配信の動画を埋め込み再生する)
 const TRACKS = [
-  { id: "LzzW_TBL558", title: "パジャマパーティーズのうた" },
-  { id: "lI7efayDEeU", title: "島のうた (セイレーンver.)" },
+  {
+    id: "LzzW_TBL558",
+    title: "パジャマパーティーズのうた",
+    appName: "パジャマパーティーズタイマー",
+    runningText: "パジャマパーティー中...",
+  },
+  {
+    id: "lI7efayDEeU",
+    title: "島のうた (セイレーンver.)",
+    appName: "島のうたタイマー",
+    runningText: "島でのんびり中...",
+  },
 ];
 const TRACK_STORAGE_KEY = "chiikawa-timer:track";
 
@@ -17,6 +27,7 @@ const resetBtn = document.getElementById("resetBtn");
 const playMusicBtn = document.getElementById("playMusicBtn");
 const trackSelect = document.getElementById("trackSelect");
 const playerCaption = document.getElementById("playerCaption");
+const appTitle = document.getElementById("appTitle");
 const inputs = [hoursInput, minutesInput, secondsInput];
 
 let player = null;
@@ -58,8 +69,17 @@ function saveTrack(track) {
   }
 }
 
-function updateCaption() {
+// 曲に合わせてタイトル・キャプションなどの表示を切り替える
+function updateTrackTexts() {
   playerCaption.textContent = `再生中:「${currentTrack.title}」(公式配信)`;
+  appTitle.textContent = currentTrack.appName;
+  document.title = `ちいかわ ${currentTrack.appName}`;
+}
+
+function runningStatusText() {
+  return playerUnavailable
+    ? `${currentTrack.runningText}(楽曲の再生に失敗しました)`
+    : currentTrack.runningText;
 }
 
 TRACKS.forEach((track) => {
@@ -69,7 +89,7 @@ TRACKS.forEach((track) => {
   trackSelect.appendChild(option);
 });
 trackSelect.value = currentTrack.id;
-updateCaption();
+updateTrackTexts();
 
 // 曲を切り替える。タイマー実行中で音楽が流れているべき状態ならすぐ新しい曲を
 // 再生し、それ以外(Start前・一時停止中・終了後)は頭出しだけして次の再生に備える。
@@ -78,20 +98,20 @@ function switchTrack(trackId) {
   if (!track || track.id === currentTrack.id) return;
   currentTrack = track;
   saveTrack(track);
-  updateCaption();
+  updateTrackTexts();
 
-  if (!playerReady) return; // onReadyで現在の曲に合わせる
+  if (!playerReady) {
+    if (running) statusText.textContent = runningStatusText();
+    return; // onReadyで現在の曲に合わせる
+  }
 
   // 前の曲が埋め込み不可などでエラーになっていても、別の曲なら再生できる
   // 可能性があるため、利用不可状態を解除して試す(失敗すればonErrorで再設定)
   if (playerUnavailable) {
     playerUnavailable = false;
-    if (running) {
-      statusText.textContent = "パジャマパーティー中...";
-    } else {
-      enableStartControl("最大24時間までセットできます");
-    }
+    if (!running) enableStartControl("最大24時間までセットできます");
   }
+  if (running) statusText.textContent = runningStatusText();
 
   loadedVideoId = track.id;
   if (running && (shouldBePlaying || !playMusicBtn.hidden)) {
@@ -168,9 +188,7 @@ function startTimer() {
   startBtn.disabled = true;
   pauseBtn.disabled = false;
   resetBtn.disabled = false;
-  statusText.textContent = playerUnavailable
-    ? "パジャマパーティー中...(楽曲の再生に失敗しました)"
-    : "パジャマパーティー中...";
+  statusText.textContent = runningStatusText();
 
   if (typeof Notification !== "undefined" && Notification.permission === "default") {
     notificationPermissionPromise = Notification.requestPermission();
@@ -271,7 +289,7 @@ async function notifyTimerFinished() {
   // showNotification()が必要)。通知は補完的な機能であり、画面表示
   // (タイマー終了！)で完了は伝わるため、失敗時は静かに諦める。
   try {
-    new Notification("パジャマパーティーズタイマー", {
+    new Notification(currentTrack.appName, {
       body: "タイマーが終了しました",
     });
   } catch (err) {
@@ -306,7 +324,7 @@ function handlePlayerUnavailable() {
   playerUnavailable = true;
 
   if (running) {
-    statusText.textContent = "パジャマパーティー中...(楽曲の再生に失敗しました)";
+    statusText.textContent = runningStatusText();
     // 回復ボタンが表示されていた場合、壊れたplayerへの再試行を防ぐため隠す
     playMusicBtn.hidden = true;
     return;
@@ -399,5 +417,5 @@ playMusicBtn.addEventListener("click", () => {
   playMusicBtn.hidden = true;
   // Start時点では失敗ステータスだった可能性があるため、
   // 回復した今は通常の実行中メッセージに戻す
-  statusText.textContent = "パジャマパーティー中...";
+  statusText.textContent = runningStatusText();
 });
