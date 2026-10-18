@@ -1,5 +1,10 @@
 const MAX_SECONDS = 24 * 60 * 60;
-const VIDEO_ID = "LzzW_TBL558"; // パジャマパーティーズのうた(公式配信・Pony Canyon提供)
+// 選べる楽曲(いずれもYouTube公式配信の動画を埋め込み再生する)
+const TRACKS = [
+  { id: "LzzW_TBL558", title: "パジャマパーティーズのうた" },
+  { id: "lI7efayDEeU", title: "島のうた (セイレーンver.)" },
+];
+const TRACK_STORAGE_KEY = "chiikawa-timer:track";
 
 const hoursInput = document.getElementById("hoursInput");
 const minutesInput = document.getElementById("minutesInput");
@@ -10,6 +15,8 @@ const startBtn = document.getElementById("startBtn");
 const pauseBtn = document.getElementById("pauseBtn");
 const resetBtn = document.getElementById("resetBtn");
 const playMusicBtn = document.getElementById("playMusicBtn");
+const trackSelect = document.getElementById("trackSelect");
+const playerCaption = document.getElementById("playerCaption");
 const inputs = [hoursInput, minutesInput, secondsInput];
 
 let player = null;
@@ -28,6 +35,74 @@ let shouldBePlaying = false;
 // Resetで初期状態に戻す)。「まだ一度もStartしていない」場合にのみ
 // 自動復旧メッセージでstatusTextを上書きしてよいかどうかの判定に使う。
 let hasStarted = false;
+let currentTrack = loadSavedTrack();
+// プレーヤーに実際に読み込まれている動画ID(onReady前の曲切り替え検出用)
+let loadedVideoId = null;
+
+function loadSavedTrack() {
+  try {
+    const saved = localStorage.getItem(TRACK_STORAGE_KEY);
+    const found = TRACKS.find((t) => t.id === saved);
+    if (found) return found;
+  } catch (err) {
+    // ストレージが使えない環境では既定の曲を使う
+  }
+  return TRACKS[0];
+}
+
+function saveTrack(track) {
+  try {
+    localStorage.setItem(TRACK_STORAGE_KEY, track.id);
+  } catch (err) {
+    // 保存できなくても曲の切り替え自体は動作する
+  }
+}
+
+function updateCaption() {
+  playerCaption.textContent = `再生中:「${currentTrack.title}」(公式配信)`;
+}
+
+TRACKS.forEach((track) => {
+  const option = document.createElement("option");
+  option.value = track.id;
+  option.textContent = track.title;
+  trackSelect.appendChild(option);
+});
+trackSelect.value = currentTrack.id;
+updateCaption();
+
+// 曲を切り替える。タイマー実行中で音楽が流れているべき状態ならすぐ新しい曲を
+// 再生し、それ以外(Start前・一時停止中・終了後)は頭出しだけして次の再生に備える。
+function switchTrack(trackId) {
+  const track = TRACKS.find((t) => t.id === trackId);
+  if (!track || track.id === currentTrack.id) return;
+  currentTrack = track;
+  saveTrack(track);
+  updateCaption();
+
+  if (!playerReady) return; // onReadyで現在の曲に合わせる
+
+  // 前の曲が埋め込み不可などでエラーになっていても、別の曲なら再生できる
+  // 可能性があるため、利用不可状態を解除して試す(失敗すればonErrorで再設定)
+  if (playerUnavailable) {
+    playerUnavailable = false;
+    if (running) {
+      statusText.textContent = "パジャマパーティー中...";
+    } else {
+      enableStartControl("最大24時間までセットできます");
+    }
+  }
+
+  loadedVideoId = track.id;
+  if (running && (shouldBePlaying || !playMusicBtn.hidden)) {
+    // selectのchangeはユーザー操作なのでautoplay制限にかからない
+    player.loadVideoById(track.id);
+    shouldBePlaying = true;
+    playMusicBtn.hidden = true;
+  } else {
+    player.cueVideoById(track.id);
+  }
+}
 
 function clampInputs() {
   // parseIntは"1e1"のような指数表記を先頭の"1"で打ち切ってしまう
@@ -208,6 +283,7 @@ startBtn.addEventListener("click", startTimer);
 pauseBtn.addEventListener("click", pauseTimer);
 resetBtn.addEventListener("click", resetTimer);
 inputs.forEach((input) => input.addEventListener("change", clampInputs));
+trackSelect.addEventListener("change", () => switchTrack(trackSelect.value));
 
 updateDisplay(0);
 
@@ -244,11 +320,12 @@ setTimeout(() => {
 
 // YouTube IFrame API が読み込まれると呼び出される
 function onYouTubeIframeAPIReady() {
+  loadedVideoId = currentTrack.id;
   player = new YT.Player("player", {
-    videoId: VIDEO_ID,
+    videoId: currentTrack.id,
+    // ループはplayerVarsのloop/playlistではなくonStateChangeで行う
+    // (playlist固定だと曲を切り替えた後に元の曲へ戻ってしまうため)
     playerVars: {
-      loop: 1,
-      playlist: VIDEO_ID,
       rel: 0,
       playsinline: 1,
     },
@@ -256,6 +333,11 @@ function onYouTubeIframeAPIReady() {
       onReady: () => {
         player.setVolume(50); // 初期音量が大きすぎるため、デフォルトを50%に下げる
         playerReady = true;
+        // プレーヤー生成後〜onReady前に曲が切り替えられていた場合に合わせる
+        if (loadedVideoId !== currentTrack.id) {
+          loadedVideoId = currentTrack.id;
+          player.cueVideoById(currentTrack.id);
+        }
         if (!playerUnavailable) {
           enableStartControl("最大24時間までセットできます");
           return;
@@ -270,6 +352,13 @@ function onYouTubeIframeAPIReady() {
         } else {
           // まだStart前なら、次のStartで通常通り再生できる状態に戻す
           enableStartControl("最大24時間までセットできます");
+        }
+      },
+      onStateChange: (event) => {
+        // 曲が終わったら、タイマー実行中は頭から繰り返す
+        if (event.data === YT.PlayerState.ENDED && running && shouldBePlaying) {
+          player.seekTo(0, true);
+          player.playVideo();
         }
       },
       onError: handlePlayerUnavailable,
