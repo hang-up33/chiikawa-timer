@@ -188,27 +188,73 @@ function unlockAudio() {
   }
 }
 
-// 「ピロリロリン」と上がるチャイムを3回くり返す
+// うさぎの「ヤハッ！」風の声をフォルマント合成で作る(公式音声ではなく雰囲気を寄せた音)。
+// のこぎり波(声帯の代わり)を母音ごとの共鳴帯域(フォルマント)のバンドパスに通して
+// 「ヤ」(イ→アへの移行)、息の雑音で「ハ」、最後に急に止めて「ッ」を表現する。
+const VOWEL_I = [350, 2700, 3400];
+const VOWEL_A = [1000, 1500, 3000];
+const FORMANT_GAINS = [1, 0.7, 0.35];
+
+function scheduleVoiced(ctx, t, dur, f0From, f0To, vowelFrom, vowelTo, glide) {
+  const osc = ctx.createOscillator();
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(f0From, t);
+  osc.frequency.linearRampToValueAtTime(f0To, t + dur);
+
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.exponentialRampToValueAtTime(0.5, t + 0.015);
+  env.gain.setValueAtTime(0.5, t + dur - 0.02);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + dur); // 「ッ」で急に止める
+  env.connect(ctx.destination);
+
+  vowelFrom.forEach((freq, i) => {
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.Q.value = 6;
+    filter.frequency.setValueAtTime(freq, t);
+    filter.frequency.linearRampToValueAtTime(vowelTo[i], t + glide);
+    const gain = ctx.createGain();
+    gain.gain.value = FORMANT_GAINS[i];
+    osc.connect(filter).connect(gain).connect(env);
+  });
+
+  osc.start(t);
+  osc.stop(t + dur + 0.02);
+}
+
+function scheduleBreath(ctx, t, dur) {
+  const buffer = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * dur), ctx.sampleRate);
+  const data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  const noise = ctx.createBufferSource();
+  noise.buffer = buffer;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = "bandpass";
+  filter.frequency.value = 1600;
+  filter.Q.value = 0.8;
+  const env = ctx.createGain();
+  env.gain.setValueAtTime(0.0001, t);
+  env.gain.exponentialRampToValueAtTime(0.35, t + 0.01);
+  env.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  noise.connect(filter).connect(env).connect(ctx.destination);
+  noise.start(t);
+}
+
+function scheduleYaha(ctx, t) {
+  scheduleVoiced(ctx, t, 0.16, 720, 980, VOWEL_I, VOWEL_A, 0.07); // ヤ
+  scheduleBreath(ctx, t + 0.15, 0.06); // h
+  scheduleVoiced(ctx, t + 0.2, 0.17, 1100, 1350, VOWEL_A, VOWEL_A, 0); // ハッ
+}
+
+// 「ヤハッ！ヤハッ！」と2回叫ぶ
 function playFinishSound() {
   if (!audioCtx) return;
   try {
-    const notes = [1046.5, 1318.5, 1568.0, 2093.0]; // ド・ミ・ソ・ド
     const start = audioCtx.currentTime + 0.05;
-    for (let r = 0; r < 3; r++) {
-      notes.forEach((freq, i) => {
-        const t = start + r * 0.9 + i * 0.12;
-        const osc = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.type = "triangle";
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0.0001, t);
-        gain.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
-        osc.connect(gain).connect(audioCtx.destination);
-        osc.start(t);
-        osc.stop(t + 0.55);
-      });
-    }
+    scheduleYaha(audioCtx, start);
+    scheduleYaha(audioCtx, start + 0.6);
   } catch (err) {
     // 鳴らせなくても画面表示・通知で終了は伝わる
   }
